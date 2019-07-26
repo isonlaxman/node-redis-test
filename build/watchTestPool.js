@@ -12,45 +12,44 @@ const RedisPool_1 = require("./RedisPool");
 function recur(member, key) {
     return __awaiter(this, void 0, void 0, function* () {
         let start = Date.now();
-        for (let i = 0; i < 1000; i++) {
-            try {
-                yield member.watch(key);
-                let multi = member.getMulti();
-                multi.incr(key);
-                yield member.exec(multi);
-            }
-            catch (err) {
-                console.log("hahaah");
-            }
+        for (let i = 0; i < 10; i++) {
+            yield new Promise(resolve => {
+                setTimeout(resolve, Math.floor(Math.random() * 5));
+            });
+            console.log(RedisPool_1.default.getSetSizes());
+            yield member.watch(key);
+            let multi = member.getMulti();
+            multi.incr(key);
+            yield member.exec(multi);
         }
-        member.releaseMember();
-        console.log(String(Date.now() - start), RedisPool_1.default.getSetSizes());
+        member.releaseConnection();
+        console.log(RedisPool_1.default.getSetSizes());
     });
 }
-function r(num = 100) {
+function task(num) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            yield RedisPool_1.default.init({ minPoolSize: 1000 });
+            yield RedisPool_1.default.init();
         }
         catch (err) {
-            console.log("init error");
+            console.log("init error", err);
+            return;
         }
-        for (let i = 0; i < 1000; i++) {
+        for (let i = 0; i < num; i++) {
             try {
                 let member = yield RedisPool_1.default.getClient();
-                yield recur(member, String(i));
-                yield new Promise(resolve => {
-                    setTimeout(resolve, 50);
-                });
+                recur(member, String(i));
+                // await new Promise(resolve => {
+                //   setTimeout(resolve, 50);
+                // });
             }
             catch (e) {
-                console.log("hahahahahaahahahahahahahaha", e);
+                console.log("error in for loop", e);
             }
-            // console.log(RedisPool.getSetSizes());
         }
     });
 }
-r(10);
+task(10000);
 // setTimeout(() => {
 //   r();
 //   console.log("-------------------------------------------------------------");

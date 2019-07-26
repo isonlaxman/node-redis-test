@@ -14,7 +14,7 @@ class RedisPoolMember {
         this.setIsConnected = (isConnected) => {
             this.isConnected = isConnected;
         };
-        this.releaseMember = () => {
+        this.releaseConnection = () => {
             if (!this.isConnected) {
                 return;
             }
@@ -45,6 +45,19 @@ class RedisPoolMember {
             try {
                 if (this.isConnected) {
                     return (yield utils_1.toPromise(this.client.get.bind(this.client))(key))[0];
+                }
+                else {
+                    throw Error("Client not connected");
+                }
+            }
+            catch (err) {
+                throw err;
+            }
+        });
+        this.sendCommand = (command, ...args) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                if (this.isConnected) {
+                    return (yield utils_1.toPromise(this.client.sendCommand.bind(this.client))(command, args))[0];
                 }
                 else {
                     throw Error("Client not connected");

@@ -1,19 +1,18 @@
-import * as redis from "redis";
-import * as util from "util";
-import { RedisPoolMember } from "./RedisPoolMember";
+import * as redis from 'redis';
+
+import { RedisPoolMember } from './RedisPoolMember';
 
 export default class RedisPool {
   private static instance: RedisPool | undefined;
   private idleMemberSet: Set<RedisPoolMember>;
   private busyMemberSet: Set<RedisPoolMember>;
-  private poolConfig: TypePoolConfig;
   private clientConfig: redis.ClientOpts;
+  private static maxNumberOfClients: undefined | number;
+  private static waitingList: ((member: RedisPoolMember) => void)[] = [];
 
   private constructor(
-    poolConfig: TypePoolConfig,
     clientConfig: redis.ClientOpts
   ) {
-    this.poolConfig = poolConfig;
     this.clientConfig = clientConfig;
     this.idleMemberSet = new Set<RedisPoolMember>();
     this.busyMemberSet = new Set<RedisPoolMember>();
@@ -23,7 +22,37 @@ export default class RedisPool {
     init: boolean = false
   ): Promise<RedisPoolMember> => {
     let instance = RedisPool.instance;
+    if (instance === undefined) {
+      throw new Error("init function not called")
+    }
+    if (!RedisPool.shouldKeepClient()) {
+      return new Promise<RedisPoolMember>((actualResolve, actualReject) => {
+        let isFinished = false;
+        function resolve(member: RedisPoolMember) {
+          if (isFinished) {
+            return;
+          }
+          isFinished = true;
+          instance.idleMemberSet.delete(member);
+          instance.busyMemberSet.add(member);
+          actualResolve(member);
+        }
 
+        function reject(err: any) {
+          if (isFinished) {
+            return;
+          }
+          isFinished = true;
+          actualReject(err);
+        }
+
+        RedisPool.waitingList.push(resolve);
+
+        setTimeout(() => {
+          reject(new Error("Waited for 500 ms to get a connection. But failed"));
+        }, 500);
+      });
+    }
     if (instance.idleMemberSet.size == 0) {
       return new Promise<RedisPoolMember>((actualResolve, actualReject) => {
         let newClient = redis.createClient(instance.clientConfig);
@@ -52,11 +81,13 @@ export default class RedisPool {
           }
 
           instance.busyMemberSet.delete(member);
-          if (
-            instance.busyMemberSet.size + instance.idleMemberSet.size <
-            instance.poolConfig.minPoolSize
-          ) {
+
+          if (RedisPool.shouldKeepClient()) {
             instance.idleMemberSet.add(member);
+            if (RedisPool.waitingList.length > 0) {
+              let next = RedisPool.waitingList.shift();
+              next(member);
+            }
           } else {
             member.quit();
           }
@@ -68,7 +99,7 @@ export default class RedisPool {
           }
 
           if (err !== undefined && err !== null) {
-            reject(new Error("Client could not be created"));
+            reject(err);
           } else {
             member = new RedisPoolMember(newClient, releaseMember);
             instance.busyMemberSet.add(member);
@@ -90,13 +121,13 @@ export default class RedisPool {
 
           if (member === undefined) {
             newClient.quit();
-            let toThrowerr = new Error("Something went wrong");
+            let toThrowErr = new Error("Something went wrong");
             if (err !== undefined) {
-              toThrowerr = err;
+              toThrowErr = err;
             } else if (lastError !== undefined) {
-              toThrowerr = lastError;
+              toThrowErr = lastError;
             }
-            reject(toThrowerr);
+            reject(toThrowErr);
           } else {
             member.setIsConnected(false);
             instance.busyMemberSet.delete(member);
@@ -122,30 +153,42 @@ export default class RedisPool {
     }
   };
 
+  static shouldKeepClient = () => {
+    let instance = RedisPool.instance;
+    if (instance === undefined) {
+      throw new Error("init function not called")
+    }
+    let currNumberOfClients = instance.busyMemberSet.size + instance.idleMemberSet.size;
+    let noOtherClient = currNumberOfClients === 0;
+    let withinLimitOfMax = RedisPool.maxNumberOfClients !== undefined &&
+      Math.floor(0.75 * RedisPool.maxNumberOfClients) >= currNumberOfClients;
+    return noOtherClient || withinLimitOfMax;
+  }
+
   static getSetSizes = () => {
     let instance = RedisPool.instance;
     return `${instance.busyMemberSet.size} ${instance.idleMemberSet.size}`;
   };
 
   static init = async (
-    poolConfig: TypePoolConfig,
     clientConfig?: redis.ClientOpts | undefined
   ) => {
     if (RedisPool.instance === undefined) {
       RedisPool.instance = new RedisPool(
-        poolConfig,
         clientConfig === undefined ? {} : clientConfig
       );
-
-      let members: RedisPoolMember[] = [];
-      for (let i = 0; i < poolConfig.minPoolSize; i++) {
-        members.push(await RedisPool.getClient());
-      }
-
-      for (let i = 0; i < members.length; i++) {
-        members[i].releaseMember();
-      }
     }
+    let client = await RedisPool.getClient();
+    let maxNumber = undefined;
+    try {
+      maxNumber = Number((await client.sendCommand('CONFIG', 'GET', "maxclients"))[1]);
+    } catch (err) {
+      client.quit();
+      RedisPool.instance = undefined;
+      throw err;
+    }
+    client.releaseConnection();
+    RedisPool.maxNumberOfClients = maxNumber;
   };
 }
 

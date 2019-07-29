@@ -14,10 +14,11 @@ async function recur(member: RedisPoolMember, key: string) {
     await member.exec(multi);
   }
 
+  let val = await member.get(key);
   member.releaseConnection();
   console.log(
     Date.now() - start,
-    await member.get(key),
+    val, 
     RedisPool.getSetSizes()
   );
 }
@@ -43,7 +44,7 @@ async function task(num: number) {
     let val = await client.get(key);
     if (val !== "10") {
       console.log("INVALID VAL");
-      return;
+      // return;
     }
   }
 
@@ -53,7 +54,7 @@ async function task(num: number) {
   for (let i = 0; i < num; i++) {
     try {
       let member = await RedisPool.getClient();
-      recur(member, String(1));
+      recur(member, String(i));
       // await new Promise(resolve => {
       //   setTimeout(resolve, 50);
       // });

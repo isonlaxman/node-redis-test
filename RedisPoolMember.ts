@@ -1,6 +1,7 @@
-import * as redis from 'redis';
+import * as redis from "redis";
 
-import { toPromise } from './utils';
+import { toPromise } from "./utils";
+import { timingSafeEqual } from "crypto";
 
 export class RedisPoolMember {
   private isConnected: boolean;
@@ -69,9 +70,9 @@ export class RedisPoolMember {
   sendCommand = async (command: string, ...args: string[]) => {
     try {
       if (this.isConnected) {
-        return (await toPromise<string[]>(this.client.sendCommand.bind(this.client))(
-          command, args
-        ))[0];
+        return (await toPromise<string[]>(
+          this.client.sendCommand.bind(this.client)
+        )(command, args))[0];
       } else {
         throw Error("Client not connected");
       }
@@ -113,6 +114,20 @@ export class RedisPoolMember {
       }
     } catch (err) {
       // We ignore this error
+    }
+  };
+
+  keys = async (s: string) => {
+    try {
+      if (this.isConnected) {
+        return (await toPromise<string[]>(this.client.keys.bind(this.client))(
+          "*"
+        ))[0];
+      } else {
+        throw Error("Client not connected");
+      }
+    } catch (err) {
+      throw err;
     }
   };
 

@@ -1,5 +1,5 @@
-import RedisPool from './RedisPool';
-import { RedisPoolMember } from './RedisPoolMember';
+import RedisPool from "./RedisPool";
+import { RedisPoolMember } from "./RedisPoolMember";
 
 async function recur(member: RedisPoolMember, key: string) {
   let start = Date.now();
@@ -7,7 +7,7 @@ async function recur(member: RedisPoolMember, key: string) {
     await new Promise(resolve => {
       setTimeout(resolve, Math.floor(Math.random() * 5));
     });
-    console.log(RedisPool.getSetSizes());
+    // console.log(RedisPool.getSetSizes());
     await member.watch(key);
     let multi = member.getMulti();
     multi.incr(key);
@@ -15,10 +15,14 @@ async function recur(member: RedisPoolMember, key: string) {
   }
 
   member.releaseConnection();
-  console.log(RedisPool.getSetSizes());
+  console.log(
+    Date.now() - start,
+    await member.get(key),
+    RedisPool.getSetSizes()
+  );
 }
 
-async function task(num) {
+async function task(num: number) {
   try {
     await RedisPool.init();
   } catch (err) {
@@ -26,10 +30,30 @@ async function task(num) {
     return;
   }
 
+  let client: RedisPoolMember;
+  // Flush all
+  try {
+    client = await RedisPool.getClient();
+  } catch (err) {
+    console.log("CAN'T FLUSH", err, "\n\n\\n");
+  }
+
+  let keys = await client.keys("*");
+  for (let key of keys) {
+    let val = await client.get(key);
+    if (val !== "10") {
+      console.log("INVALID VAL");
+      return;
+    }
+  }
+
+  await client.exec(client.getMulti().flushall());
+  await client.releaseConnection();
+
   for (let i = 0; i < num; i++) {
     try {
       let member = await RedisPool.getClient();
-      recur(member, String(i));
+      recur(member, String(1));
       // await new Promise(resolve => {
       //   setTimeout(resolve, 50);
       // });
@@ -39,7 +63,7 @@ async function task(num) {
   }
 }
 
-task(10000);
+task(10);
 // setTimeout(() => {
 //   r();
 //   console.log("-------------------------------------------------------------");
